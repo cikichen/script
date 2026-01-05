@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         多账号自动登录脚本
+// @name         多账号自动化助手
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      2.0
 // @description  自动登录多个账户并登出
 // @author       Linux.do
 // @match        https://linux.do/*
@@ -70,7 +70,7 @@
             padding: 24px;
             border-radius: 20px;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
-            width: 450px;
+            width: 520px;
             max-width: 90vw;
             max-height: 80vh;
             overflow-y: auto;
@@ -206,6 +206,78 @@
         @keyframes tm-spin {
             to { transform: rotate(360deg); }
         }
+        .tm-settings-section {
+            background: #f5f5f7;
+            padding: 12px 15px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+        .tm-settings-section h3 {
+            margin: 0 0 8px 0;
+            font-size: 12px;
+            color: #86868b;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .tm-settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .tm-setting-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #e5e5e5;
+        }
+        .tm-setting-item label {
+            font-size: 13px;
+            color: #1d1d1f;
+        }
+        .tm-setting-item input[type="number"] {
+            width: 50px;
+            padding: 4px 6px;
+            border: 1px solid #d2d2d7;
+            border-radius: 6px;
+            font-size: 13px;
+            text-align: center;
+        }
+        .tm-table-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding: 0 2px;
+        }
+        .tm-table-toolbar span {
+            font-size: 12px;
+            color: #86868b;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .tm-batch-btns {
+            display: flex;
+            gap: 6px;
+        }
+        .tm-batch-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #e8e8ed;
+            color: #1d1d1f;
+            transition: all 0.15s;
+        }
+        .tm-batch-btn:hover {
+            background: #0071e3;
+            color: white;
+        }
     `;
 
     const styleElement = document.createElement('style');
@@ -259,30 +331,67 @@
             GM_setValue('shouldRunMain', true);
             main();
         } else {
+            // 停止时清除所有状态
             GM_setValue('shouldRunMain', false);
+            GM_setValue('autoLikeTasks', null);
+            GM_setValue('accountIndex', 0);
+            updateRunningStatus(null); // 隐藏状态指示器
         }
     }
 
+
     function openConfig() {
         if (document.getElementById('tm-config-overlay')) return;
+
+        let globalSettings = GM_getValue('globalSettings', {});
+        // 兼容旧配置，确保字段有默认值
+        globalSettings.topicsToRead = globalSettings.topicsToRead || 3;
+        globalSettings.dailyLikesLimit = globalSettings.dailyLikesLimit || 50;
 
         let configHtml = `
             <div id="tm-config-overlay">
                 <div id="tm-config">
                     <h2>账号配置</h2>
+                    
+                    <div class="tm-settings-section">
+                        <h3>运行参数</h3>
+                        <div class="tm-settings-grid">
+                            <div class="tm-setting-item">
+                                <label>阅读帖子数</label>
+                                <input type="number" id="tm-topics-count" value="${globalSettings.topicsToRead}" min="1" max="50">
+                            </div>
+                            <div class="tm-setting-item">
+                                <label>每日点赞上限</label>
+                                <input type="number" id="tm-likes-limit" value="${globalSettings.dailyLikesLimit}" min="1" max="200">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="tm-table-toolbar">
+                        <span>账号列表</span>
+                        <div class="tm-batch-btns">
+                            <button class="tm-batch-btn" id="tm-batch-read">全选阅读</button>
+                            <button class="tm-batch-btn" id="tm-batch-like">全选点赞</button>
+                            <button class="tm-batch-btn" id="tm-batch-all">全选</button>
+                            <button class="tm-batch-btn" id="tm-batch-none">清除</button>
+                        </div>
+                    </div>
+                    
                     <table id="tm-accounts-table">
                         <thead>
                             <tr>
-                                <th style="width: 45%;">用户名</th>
-                                <th style="width: 45%;">密码</th>
-                                <th style="width: 50px; text-align: center;">操作</th>
+                                <th style="width: 32%;">用户名</th>
+                                <th style="width: 32%;">密码</th>
+                                <th style="width: 13%; text-align: center;">阅读</th>
+                                <th style="width: 13%; text-align: center;">点赞</th>
+                                <th style="width: 36px;"></th>
                             </tr>
                         </thead>
                         <tbody id="tm-accounts-list"></tbody>
                     </table>
                     <div class="tm-btn-container">
                         <button id="tm-add-account" class="tm-btn tm-btn-secondary">添加账号</button>
-                        <button id="tm-save-config" class="tm-btn tm-btn-primary">保存配置</button>
+                        <button id="tm-save-config" class="tm-btn tm-btn-primary">保存</button>
                         <button id="tm-close-config" class="tm-btn tm-btn-secondary">取消</button>
                     </div>
                 </div>
@@ -291,7 +400,7 @@
         document.body.insertAdjacentHTML('beforeend', configHtml);
 
         accounts.forEach((account, index) => {
-            addAccountFields(index, account.username, account.password);
+            addAccountFields(index, account.username, account.password, account.autoRead, account.autoLike);
         });
 
         document.getElementById('tm-add-account').addEventListener('click', () => {
@@ -305,9 +414,23 @@
         document.getElementById('tm-config-overlay').addEventListener('click', (e) => {
             if (e.target.id === 'tm-config-overlay') e.target.remove();
         });
+
+        // 批量操作按钮事件
+        document.getElementById('tm-batch-read').addEventListener('click', () => {
+            document.querySelectorAll('.tm-auto-read').forEach(cb => cb.checked = true);
+        });
+        document.getElementById('tm-batch-like').addEventListener('click', () => {
+            document.querySelectorAll('.tm-auto-like').forEach(cb => cb.checked = true);
+        });
+        document.getElementById('tm-batch-all').addEventListener('click', () => {
+            document.querySelectorAll('.tm-auto-read, .tm-auto-like').forEach(cb => cb.checked = true);
+        });
+        document.getElementById('tm-batch-none').addEventListener('click', () => {
+            document.querySelectorAll('.tm-auto-read, .tm-auto-like').forEach(cb => cb.checked = false);
+        });
     }
 
-    function addAccountFields(index, username = '', password = '') {
+    function addAccountFields(index, username = '', password = '', autoRead = false, autoLike = false) {
         let accountHtml = `
             <tr class="tm-account-tr" data-index="${index}">
                 <td>
@@ -315,6 +438,12 @@
                 </td>
                 <td>
                     <input type="password" class="tm-config-input tm-password" value="${password}" placeholder="密码">
+                </td>
+                <td style="text-align: center;">
+                    <input type="checkbox" class="tm-auto-read" ${autoRead ? 'checked' : ''} style="transform: scale(1.2);">
+                </td>
+                <td style="text-align: center;">
+                    <input type="checkbox" class="tm-auto-like" ${autoLike ? 'checked' : ''} style="transform: scale(1.2);">
                 </td>
                 <td>
                     <button class="tm-btn tm-btn-danger tm-remove-account" title="移除账号">×</button>
@@ -331,11 +460,21 @@
     }
 
     function saveConfig() {
+        // 保存全局设置
+        let globalSettings = {
+            topicsToRead: parseInt(document.getElementById('tm-topics-count').value) || 3,
+            dailyLikesLimit: parseInt(document.getElementById('tm-likes-limit').value) || 50
+        };
+        GM_setValue('globalSettings', globalSettings);
+
+        // 保存账号列表
         let accountRows = document.getElementsByClassName('tm-account-tr');
         accounts = Array.from(accountRows).map(tr => {
             return {
                 username: tr.querySelector('.tm-username').value,
-                password: tr.querySelector('.tm-password').value
+                password: tr.querySelector('.tm-password').value,
+                autoRead: tr.querySelector('.tm-auto-read').checked,
+                autoLike: tr.querySelector('.tm-auto-like').checked
             };
         }).filter(acc => acc.username && acc.password);
 
@@ -436,8 +575,10 @@
                     console.log('已登录，准备登出');
                     updateRunningStatus(`账号 ${accountIndex + 1}/${accounts.length} 处理中... 准备登出`);
                     logout(() => {
-                        // 登出后不立即增加索引，等跳转到未登录状态后再处理下一个
-                        document.addEventListener('DOMContentLoaded', main);
+                        // 登出后延迟继续下一个账号
+                        setTimeout(() => {
+                            main();
+                        }, 2000);
                     });
                 } else {
                     let account = accounts[accountIndex];
@@ -445,9 +586,33 @@
                     updateRunningStatus(`正在登录：${account.username} (${accountIndex + 1}/${accounts.length})`);
                     GM_setValue('currentAccount', account.username);
                     login(account, () => {
-                        // 登录成功，增加索引，准备处理下一个（或者刷新页面）
-                        GM_setValue('accountIndex', accountIndex + 1);
-                        document.addEventListener('DOMContentLoaded', main);
+                        console.log('登录成功，准备下一步');
+
+                        // 根据配置决定执行流程
+                        if (account.autoRead || account.autoLike) {
+                            let globalSettings = GM_getValue('globalSettings', { topicsToRead: 3, dailyLikesLimit: 50 });
+                            GM_setValue('autoLikeTasks', {
+                                accountIndex: accountIndex,
+                                remainingTopics: globalSettings.topicsToRead, // 使用全局配置
+                                remainingLikes: globalSettings.dailyLikesLimit, // 每日点赞上限
+                                doneTopics: [],
+                                autoRead: account.autoRead,
+                                autoLike: account.autoLike
+                            });
+                            // 优先跳转到未读页面
+                            let unreadLink = document.querySelector('a[href="/unread"], a[href="/new"]');
+                            if (unreadLink) {
+                                unreadLink.click();
+                            } else {
+                                startAutoLikeFlow();
+                            }
+                        } else {
+                            // 仅登录模式，延迟继续下一个账号
+                            GM_setValue('accountIndex', accountIndex + 1);
+                            setTimeout(() => {
+                                main();
+                            }, 2000);
+                        }
                     });
                 }
             } else {
@@ -461,13 +626,242 @@
         }, 2000);
     }
 
+    function startAutoLikeFlow() {
+        if (!GM_getValue('scriptEnabled', false)) return;
+
+        let tasks = GM_getValue('autoLikeTasks', null);
+        if (!tasks) return;
+
+        if (tasks.remainingTopics <= 0) {
+            console.log('该账号任务已全部完成');
+            updateRunningStatus('任务完成，正在准备下一个账号...');
+            GM_setValue('autoLikeTasks', null);
+            GM_setValue('accountIndex', tasks.accountIndex + 1);
+
+            // 刷新页面继续下一个账号
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+            return;
+        }
+
+        const path = window.location.pathname;
+
+        // 首页/未读页/新帖页逻辑：选择帖子
+        if (path === '/' || path === '/latest' || path === '/unread' || path === '/new' || path === '/top') {
+            let actionText = [];
+            if (tasks.autoRead) actionText.push('阅读');
+            if (tasks.autoLike) actionText.push('点赞');
+            updateRunningStatus(`自动${actionText.join('+')}... 剩余 ${tasks.remainingTopics} 个帖子`);
+
+            // 等待帖子列表出现
+            setTimeout(() => {
+                // 优先选择未读帖子
+                let unreadTopics = Array.from(document.querySelectorAll('tr.topic-list-item.unread a.title, tr.topic-list-item.new-topic a.title'))
+                    .filter(a => !tasks.doneTopics.includes(a.href));
+
+                // 如果没有未读，就选择普通帖子
+                let topics = unreadTopics.length > 0 ? unreadTopics :
+                    Array.from(document.querySelectorAll('a.title.raw-link.raw-topic-link'))
+                        .filter(a => !tasks.doneTopics.includes(a.href));
+
+                if (topics.length > 0) {
+                    let randomTopic = topics[Math.floor(Math.random() * Math.min(topics.length, 10))];
+                    tasks.doneTopics.push(randomTopic.href);
+                    GM_setValue('autoLikeTasks', tasks);
+                    console.log('SPA 跳转至：', randomTopic.href, unreadTopics.length > 0 ? '(未读)' : '(普通)');
+                    randomTopic.click();
+                } else {
+                    console.warn('未找到合适帖子，尝试滚动加载');
+                    window.scrollBy(0, 500);
+                }
+            }, 1000);
+        }
+        // 帖子内逻辑
+        else if (path.includes('/t/')) {
+            if (tasks.isProcessingPost) return; // 防止重复触发
+
+            tasks.isProcessingPost = true;
+            GM_setValue('autoLikeTasks', tasks);
+
+            processTopicContent(tasks.autoRead, tasks.autoLike).then(() => {
+                let currentTasks = GM_getValue('autoLikeTasks', null);
+                if (!currentTasks) return;
+
+                currentTasks.remainingTopics--;
+                currentTasks.isProcessingPost = false;
+                GM_setValue('autoLikeTasks', currentTasks);
+
+                updateRunningStatus('当前帖子处理完毕，准备返回...');
+
+                setTimeout(() => {
+                    // 返回未读页面继续
+                    let unreadLink = document.querySelector('a[href="/unread"], a[href="/new"]');
+                    let homeLink = document.querySelector('#site-logo, a[href="/"]');
+                    if (unreadLink) unreadLink.click();
+                    else if (homeLink) homeLink.click();
+                    else history.back();
+                }, 1500);
+            });
+        }
+    }
+
+    async function processTopicContent(shouldRead, shouldLike) {
+        let clickedPostIds = new Set();
+        let likedCount = 0;
+
+        console.log('processTopicContent 开始, shouldRead:', shouldRead, 'shouldLike:', shouldLike);
+
+        // 边滚动边点赞
+        for (let i = 0; i < 30; i++) {
+            // 检查脚本是否被停止
+            if (!GM_getValue('scriptEnabled', false)) {
+                console.log('脚本已停止');
+                return;
+            }
+
+            // 每次循环重新获取 tasks 确保数据同步
+            let tasks = GM_getValue('autoLikeTasks', null);
+
+            // 点赞当前可见的帖子
+            if (shouldLike && tasks && tasks.remainingLikes > 0) {
+                let posts = document.querySelectorAll('.topic-post');
+                console.log('找到帖子数量:', posts.length);
+
+                for (let post of posts) {
+                    tasks = GM_getValue('autoLikeTasks', null);
+                    if (!tasks || tasks.remainingLikes <= 0) break;
+
+                    const postId = post.id || post.dataset.postId || `post_${Date.now()}`;
+                    if (clickedPostIds.has(postId)) continue;
+
+                    // 查找点赞按钮（优先找未点赞的）
+                    let likeButton = post.querySelector('button.btn-toggle-reaction-like');
+
+                    if (!likeButton) {
+                        console.log('帖子', postId, '未找到点赞按钮');
+                        clickedPostIds.add(postId);
+                        continue;
+                    }
+
+                    // 通过 title 判断是否已点赞
+                    // 未点赞: title="点赞此帖子"
+                    // 已点赞: title="删除此 heart 回应"
+                    let buttonTitle = likeButton.getAttribute('title') || '';
+                    let isAlreadyLiked = buttonTitle.includes('删除') || buttonTitle.includes('remove');
+
+                    if (!isAlreadyLiked) {
+                        updateRunningStatus(`点赞 ${postId.replace('post_', '')} 楼 (剩余${tasks.remainingLikes})`);
+                        likeButton.click();
+                        clickedPostIds.add(postId);
+                        likedCount++;
+                        tasks.remainingLikes--;
+                        GM_setValue('autoLikeTasks', tasks);
+                        console.log('已点赞', postId, '剩余', tasks.remainingLikes);
+                        await new Promise(r => setTimeout(r, 1200 + Math.random() * 500));
+                    } else {
+                        console.log('帖子', postId, '已点赞，跳过');
+                        clickedPostIds.add(postId);
+                    }
+                }
+
+            }
+
+            // 滚动阅读
+            if (shouldRead) {
+                updateRunningStatus(`阅读中... 已点赞${likedCount}个`);
+                window.scrollBy(0, 300);
+                await new Promise(r => setTimeout(r, 400 + Math.random() * 300));
+
+                // 检查是否已到底部
+                if ((window.innerHeight + window.scrollY) >= document.body.scrollHeight - 100) {
+                    console.log('已滚动到底部');
+                    break;
+                }
+            } else {
+                // 不需要阅读时只处理一次
+                break;
+            }
+        }
+
+        console.log(`处理完成，共点赞 ${likedCount} 个`);
+    }
+
+
+
+    async function processTopicLikes() {
+        updateRunningStatus('正在分析楼层，准备点赞...');
+
+        let tasks = GM_getValue('autoLikeTasks', null);
+        if (!tasks || tasks.remainingLikes <= 0) {
+            console.log('今日点赞配额已用完');
+            return;
+        }
+
+        let likedInThisPost = 0;
+        let clickedPostIds = new Set();
+
+        // 获取当前页面所有帖子，按顺序处理（不滚动）
+        let posts = document.querySelectorAll('.topic-post');
+
+        for (let post of posts) {
+            if (tasks.remainingLikes <= 0) break;
+
+            const postId = post.id || post.dataset.postId;
+            if (!postId || clickedPostIds.has(postId)) continue;
+
+            let likeButton = post.querySelector('button.btn-toggle-reaction-like');
+            let isAlreadyLiked = likeButton && likeButton.classList.contains('has-reacted');
+
+            if (likeButton && !isAlreadyLiked) {
+                updateRunningStatus(`点赞 ${postId.replace('post_', '')} 楼 (剩余${tasks.remainingLikes})`);
+
+                likeButton.click();
+                clickedPostIds.add(postId);
+                likedInThisPost++;
+                tasks.remainingLikes--;
+                GM_setValue('autoLikeTasks', tasks);
+                console.log(`已点赞 ${postId} (剩余${tasks.remainingLikes})`);
+
+                // 等待 DOM 更新
+                await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
+            }
+        }
+
+        console.log(`本帖点赞 ${likedInThisPost} 个，今日剩余 ${tasks.remainingLikes} 个`);
+    }
+
+
+    // 路由监控器：监听浏览器内容变化驱动状态机
+    let lastUrl = location.href;
+    setInterval(() => {
+        if (location.href !== lastUrl) {
+            lastUrl = location.href;
+            console.log('检测到路由变化，重新触发逻辑');
+            if (GM_getValue('autoLikeTasks', null)) {
+                startAutoLikeFlow();
+            }
+        }
+    }, 500);
+
     window.addEventListener('load', function () {
         if (GM_getValue('shouldRunMain', false) && GM_getValue('scriptEnabled', false)) {
-            let accountIndex = GM_getValue('accountIndex', 0);
-            if (accountIndex < accounts.length) {
-                updateRunningStatus(`准备处理第 ${accountIndex + 1}/${accounts.length} 个账号...`);
+            let tasks = GM_getValue('autoLikeTasks', null);
+            if (tasks) {
+                startAutoLikeFlow();
+            } else {
+                let accountIndex = GM_getValue('accountIndex', 0);
+                if (accountIndex < accounts.length) {
+                    updateRunningStatus(`准备处理第 ${accountIndex + 1}/${accounts.length} 个账号...`);
+                    main();
+                } else {
+                    // 完成所有账号
+                    GM_setValue('shouldRunMain', false);
+                    GM_setValue('scriptEnabled', false);
+                    updateRunningStatus(null);
+                    showMessage('所有账号及点赞任务已执行完毕！');
+                }
             }
-            main();
         }
     });
 })();
