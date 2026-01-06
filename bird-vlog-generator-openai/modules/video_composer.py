@@ -56,20 +56,25 @@ def compose_video(
     return output_path
 
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+
+
 def compose_from_highlights(
     highlights: list[dict],
     audio_path: str,
     output_path: str,
-    clip_duration: float = None,  # None = 自动计算
+    clip_duration: float | list[float] = None,  # None = 自动计算, 也可以是时长列表
     subtitle_file: str = None,
-    subtitle_text: str = None
+    subtitle_text: str = None,
+    max_workers: int = 4
 ) -> str:
     """从精彩片段提取视频并合成 Vlog
     
     关键优化：
-    1. 根据音频时长自动计算每个片段的时长
-    2. 使用简单淡入淡出效果（更稳定）
-    3. 确保视频总时长与音频匹配
+    1. 支持并行片段提取（大幅提升速度）
+    2. 支持针对每个片段指定不同时长（配合逐段旁白）
+    3. 添加 tqdm 进度条显示
     """
     if not highlights:
         raise ValueError("没有精彩片段")
@@ -80,51 +85,71 @@ def compose_from_highlights(
     try:
         # 1. 获取音频时长
         audio_duration = get_media_duration(audio_path)
-        print(f"  音频时长: {audio_duration:.1f}秒")
+        print(f"  音频总时长: {audio_duration:.1f}秒")
         
-        # 2. 计算每个片段的时长（确保总时长匹配音频）
+        # 2. 计算每个片段的时长
         num_clips = len(highlights)
         if clip_duration is None:
-            clip_duration = audio_duration / num_clips
-        print(f"  每片段时长: {clip_duration:.1f}秒")
+            avg_duration = audio_duration / num_clips
+            durations = [avg_duration] * num_clips
+        elif isinstance(clip_duration, list):
+            durations = clip_duration
+        else:
+            durations = [clip_duration] * num_clips
         
-        # 3. 提取视频片段
-        print(f"  提取 {num_clips} 个视频片段...")
-        clips = []
+        # 3. 提取视频片段（并行处理）
+        print(f"  并行提取 {num_clips} 个视频片段 (线程数: {max_workers})...")
+        clips = [None] * num_clips
         
-        for i, highlight in enumerate(highlights):
+        def extract_worker(index, highlight, duration):
             timestamp = highlight.get("timestamp", 0)
             video_path = highlight.get("video_path")
             
             if not video_path or not os.path.exists(video_path):
-                continue
+                return index, None
             
-            start_time = max(0, timestamp - clip_duration / 2)
-            clip_path = os.path.join(temp_dir, f"clip_{i:04d}.mp4")
+            start_time = max(0, timestamp - duration / 2)
+            clip_path = os.path.join(temp_dir, f"clip_{index:04d}.mp4")
             
-            # 只在第一个和最后一个片段加淡入淡出
-            is_first = (i == 0)
-            is_last = (i == num_clips - 1)
+            is_first = (index == 0)
+            is_last = (index == num_clips - 1)
             
             try:
                 extract_clip_simple(
-                    video_path, start_time, clip_duration, clip_path,
+                    video_path, start_time, duration, clip_path,
                     fade_in=is_first, fade_out=is_last
                 )
-                clips.append(clip_path)
+                return index, clip_path
             except Exception as e:
-                print(f"    片段 {i} 提取失败: {e}")
+                print(f"    片段 {index} 提取失败: {e}")
+                return index, None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for i in range(num_clips):
+                futures.append(executor.submit(extract_worker, i, highlights[i], durations[i]))
+            
+            for future in tqdm(as_completed(futures), total=num_clips, desc="  提取进度", unit="clip"):
+                idx, path = future.result()
+                if path:
+                    clips[idx] = path
         
-        if not clips:
+        # 过滤提取失败的片段
+        valid_clips = [c for c in clips if c is not None]
+        
+        if not valid_clips:
             raise ValueError("没有成功提取任何视频片段")
         
-        print(f"  ✓ 成功提取 {len(clips)} 个片段")
+        if len(valid_clips) < num_clips:
+            print(f"  警告: 有 {num_clips - len(valid_clips)} 个片段提取失败")
         
         # 4. 拼接视频
+        print("  正在拼接视频片段...")
         merged_video = os.path.join(temp_dir, "merged.mp4")
-        concat_videos(clips, merged_video)
+        concat_videos(valid_clips, merged_video)
         
         # 5. 添加音频和字幕
+        print("  正在压制字幕和音频...")
         add_audio_and_subtitle(merged_video, audio_path, output_path, subtitle_file, subtitle_text)
         
         return output_path

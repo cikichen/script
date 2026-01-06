@@ -7,30 +7,42 @@ import sys
 from openai import OpenAI
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL
+from config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL, HIGHLIGHT_MIN_SCORE
 
 client = OpenAI(
     api_key=OPENAI_API_KEY or os.getenv("OPENAI_API_KEY"),
     base_url=OPENAI_BASE_URL
 )
 
-ANALYSIS_PROMPT = """分析这张图片，返回 JSON 格式：
+ANALYSIS_PROMPT = """你是一个顶级的自然摄影评审，专门负责从大量的野外素材中挑选出最精彩的片段。
+请分析这张图片，识别鸟类名称、行为，并根据以下**严苛**的标准给出 1-10 的“高光分 (highlight_score)”：
+
+### 重点关注的高价值行为：
+- **顶级 (9-10分)**：捕食瞬间（抓鱼、捕蝉）、空中格斗、极速俯冲、破水而出、育雏喂食、求偶舞步、交配。
+- **高价值 (7-8分)**：展翅高飞、悬停（如蜂鸟或翠鸟）、俯冲预备、带食材回巢、筑巢加固、激烈争吵、洗澡溅水、刚起飞或落枝的瞬间。
+- **中等 (5-6分)**：稳定鸣叫、梳理羽毛、缓慢行走觅食、好奇观察镜头、警戒姿态。
+- **低价值 (1-4分)**：静止睡觉、背对镜头、主体模糊、遮挡严重或纯背景。
+
+### 评分标准：
+- **10分 (顶级珍宝)**：极罕见瞬间 + 完美构图 + 主体清晰巨大。
+- **8-9分 (非常精彩)**：动作感极强，画面锐利，主体突出。
+- **6-7分 (优秀素材)**：典型行为展示，主体清晰，背景干净。
+- **4-5分 (平庸记录)**：主体偏小或行为单一，画面一般。
+- **1-3分 (废片)**：无主体、模糊或严重遮挡。
+
+请以 JSON 格式返回：
 {
     "has_bird": true/false,
-    "bird_species": "鸟类名称或 null",
-    "activity": "行为描述（如筑巢/觅食/休息/喂食幼鸟/飞行）",
-    "scene_description": "场景一句话描述",
-    "highlight_score": 1-10,
-    "timestamp_suggestion": "建议的旁白文字"
+    "bird_species": "具体鸟名，不确定则写种类名，无则 null",
+    "activity": "简炼的动态描述（如：悬停寻猎、带树枝筑巢、破水而出）",
+    "behavior_category": "行为分类（取值：捕食/飞行/空中互动/育雏/求偶/洗澡/理羽/休息/寻觅/其他）",
+    "scene_description": "画面意境描述（如：晨雾中展开的双翼）",
+    "highlight_score": 1-10 (整数),
+    "composition_quality": "从摄影角度评价构图",
+    "timestamp_suggestion": "建议的短旁白核心（5-10字，绝对严禁含标签编号）"
 }
 
-评分标准:
-- 10分: 极其罕见的精彩瞬间
-- 7-9分: 精彩互动
-- 4-6分: 普通活动
-- 1-3分: 无主体或画面模糊
-
-只返回 JSON，不要其他内容。"""
+只返回纯 JSON，不要任何 Markdown 块或额外解释。"""
 
 
 def analyze_image(image_path: str, prompt: str = ANALYSIS_PROMPT) -> str:

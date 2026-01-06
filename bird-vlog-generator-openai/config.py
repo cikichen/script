@@ -21,3 +21,4 @@ MAX_FRAMES_PER_VIDEO = int(os.getenv("MAX_FRAMES_PER_VIDEO", "3"))  # 每视频�
 
 # 输出配置
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
+HIGHLIGHT_MIN_SCORE = int(os.getenv("HIGHLIGHT_MIN_SCORE", "7"))  # 精彩片段筛选阈值

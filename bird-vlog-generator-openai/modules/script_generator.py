@@ -76,22 +76,19 @@ def generate_script_with_segments(
         default_text = "这是一段宁静的自然观察记录，让我们一起感受大自然的美好。"
         return default_text, [{"segment_index": 0, "text": default_text}]
     
-    # 构建片段描述
+    # 构建描述信息，不再使用“片段1”这种前缀，避免误导 LLM
     segment_descriptions = []
     for i, result in enumerate(valid_results):
-        desc = result.get("description", "")
         bird_type = result.get("bird_type", "")
         activity = result.get("activity", "")
+        desc = result.get("description", "")
         
-        segment_desc = f"片段{i+1}: "
-        if bird_type:
-            segment_desc += f"{bird_type}"
-        if activity:
-            segment_desc += f"正在{activity}"
-        if desc:
-            segment_desc += f"，{desc[:50]}"
+        info = []
+        if bird_type: info.append(f"鸟类: {bird_type}")
+        if activity: info.append(f"行为: {activity}")
+        if desc: info.append(f"细节: {desc[:50]}")
         
-        segment_descriptions.append(segment_desc)
+        segment_descriptions.append(f"画面{i+1}: " + "，".join(info))
     
     style_guide = {
         "温馨": "语气温馨、富有故事性，像在给朋友分享一个有趣的发现",
@@ -99,31 +96,32 @@ def generate_script_with_segments(
         "幽默": "语气轻松幽默，带有趣味性的解说"
     }
     
-    prompt = f"""你是一个专业的自然纪录片旁白撰稿人。
-根据以下视频片段描述，撰写一段有故事性的 Vlog 旁白脚本。
+    prompt = f"""你是一个优秀的自然观察 Vlog 旁白撰稿人。
+请根据以下按时间顺序排列的视频画面描述，撰写一段连贯、动人的故事旁白。
 
-片段描述：
+画面描述列表：
 {chr(10).join(segment_descriptions)}
 
-要求：
-1. 为每个片段生成对应的旁白句子
-2. 脚本要有整体故事性，有起承转合
-3. 风格: {style_guide.get(style, style_guide["温馨"])}
-4. 使用中文
-{f'5. 重点突出主角: {expected_bird}' if expected_bird else ''}
-{f'6. 脚本总时长大约需要匹配: {target_duration}秒（语速约为每秒 4-5 个字）' if target_duration else ''}
+核心要求：
+1. **严禁出现标签**：旁白内容中绝对不能出现“片段1”、“画面x”、“镜头x”或任何编号。
+2. **整体故事性**：旁白应该是一个自然流淌的故事，有起承转合，句子之间衔接自然。
+3. **精准对应**：虽然旁白要连贯，但每一句必须能够完美对应到其对应的画面描述上。
+4. **风格**: {style_guide.get(style, style_guide["温馨"])}
+5. **语言**: 使用中文。
+{f'6. **主角**: 重点围绕“{expected_bird}”展开' if expected_bird else ''}
+{f'7. **时长控制**: 目标时长约 {target_duration} 秒（总字数控制在 {int(target_duration * 4)} 字左右）' if target_duration else ''}
 
-请按以下 JSON 格式返回：
+请务必按以下 JSON 格式返回：
 {{
-    "full_script": "完整的旁白脚本（连贯的故事）",
+    "full_script": "这里填入完整的串联好的脚本文本（不含任何编号标签）",
     "segments": [
-        {{"segment_index": 0, "text": "对应片段1的旁白句子"}},
-        {{"segment_index": 1, "text": "对应片段2的旁白句子"}},
+        {{"segment_index": 0, "text": "对应画面1的旁白内容，要求合并到一起就是上面的完整脚本"}},
+        {{"segment_index": 1, "text": "对应画面2的旁白内容"}},
         ...
     ]
 }}
 
-只返回 JSON，不要其他内容。"""
+重要：只返回纯 JSON 内容，不要任何开头或结尾的解释。"""
 
     response = client.chat.completions.create(
         model=OPENAI_MODEL,

@@ -8,7 +8,8 @@ import argparse
 import glob
 from datetime import datetime
 
-from config import OUTPUT_DIR
+from tqdm import tqdm
+from config import OUTPUT_DIR, HIGHLIGHT_MIN_SCORE
 from modules.frame_sampler import extract_keyframes, get_video_duration
 from modules.bedrock_analyzer import batch_analyze, filter_highlights
 from modules.script_generator import generate_script, generate_script_with_segments, generate_subtitles, generate_subtitles_for_segments, save_srt
@@ -106,12 +107,12 @@ def process_single_video(
     print(f"  ✓ 提取了 {len(frame_infos)} 帧")
     print()
     
-    # 2. AI 视觉分析
-    print("🤖 步骤 2/5: AI 视觉分析...")
+    pbar = tqdm(total=len(frame_infos), desc="🤖 AI 视觉分析", unit="frame")
     def progress(current, total):
-        print(f"  分析中: {current}/{total}", end="\r")
+        pbar.update(1)
     
     analysis_results = batch_analyze(frame_infos, max_workers=workers, progress_callback=progress)
+    pbar.close()
     print()
     
     # 保存分析结果
@@ -119,7 +120,7 @@ def process_single_video(
     with open(analysis_file, "w", encoding="utf-8") as f:
         json.dump(analysis_results, f, ensure_ascii=False, indent=2)
     
-    highlights = filter_highlights(analysis_results, min_score=7)
+    highlights = filter_highlights(analysis_results, min_score=HIGHLIGHT_MIN_SCORE)
     print(f"  ✓ 分析完成，发现 {len(highlights)} 个精彩片段")
     print()
     
@@ -215,10 +216,12 @@ def generate_merged_vlog(
     
     # 2. AI 视觉分析
     print("🤖 步骤 2/5: AI 视觉分析...")
+    pbar = tqdm(total=len(all_frame_infos), desc="🤖 AI 视觉分析", unit="frame")
     def progress(current, total):
-        print(f"  分析中: {current}/{total}", end="\r")
+        pbar.update(1)
     
     all_analysis = batch_analyze(all_frame_infos, max_workers=workers, progress_callback=progress)
+    pbar.close()
     print()
     
     # 保存分析结果
@@ -226,10 +229,18 @@ def generate_merged_vlog(
     with open(analysis_file, "w", encoding="utf-8") as f:
         json.dump(all_analysis, f, ensure_ascii=False, indent=2)
     
-    # 筛选可用片段
-    usable_clips = [r for r in all_analysis if r.get("highlight_score", 0) >= 3 and r.get("video_path")]
+    # 筛选可用片段 (动态升降级筛选策略)
+    # 1. 优先尝试使用配置的高分阈值 (默认 7)
+    usable_clips = [r for r in all_analysis if r.get("highlight_score", 0) >= HIGHLIGHT_MIN_SCORE and r.get("video_path")]
+    
+    # 2. 如果高分片段太少 (少于 3 个)，尝试降级到 4 分 (普通素材)
+    if len(usable_clips) < 3:
+        usable_clips = [r for r in all_analysis if r.get("highlight_score", 0) >= 4 and r.get("video_path")]
+        
+    # 3. 如果依然没有，则保底使用所有有视频路径的片段
     if not usable_clips:
         usable_clips = [r for r in all_analysis if r.get("video_path")]
+    
     if not usable_clips:
         usable_clips = all_frame_infos
     
@@ -250,35 +261,58 @@ def generate_merged_vlog(
     print(f"  ✓ 已为 {len(segment_subtitles)} 个片段生成对应字幕")
     print()
     
-    # 4. 语音合成
-    print("🎙️ 步骤 4/5: 语音合成...")
-    audio_path = os.path.join(work_dir, "narration.mp3")
-    text_to_speech(script, audio_path)
+    # 4. 逐段语音合成 (解决音画同步的关键)
+    print("🎙️ 步骤 4/5: 逐段旁白合成 (确保音画完美匹配)...")
+    temp_audio_dir = os.path.join(work_dir, "temp_audio")
+    os.makedirs(temp_audio_dir, exist_ok=True)
+    
+    audio_segments = []
+    clip_durations = []
+    
+    for i, seg in enumerate(tqdm(segment_subtitles, desc="🎙️ 旁白合成", unit="seg")):
+        text = seg.get("text", "")
+        if not text:
+            # 如果某片段没有旁白，给一个默认时长（如 3 秒）
+            clip_durations.append(3.0)
+            continue
+            
+        seg_audio_path = os.path.abspath(os.path.join(temp_audio_dir, f"seg_{i:03d}.mp3"))
+        text_to_speech(text, seg_audio_path)
+        
+        # 获取该段语音的时长
+        from modules.polly_tts import get_audio_duration
+        seg_duration = get_audio_duration(seg_audio_path)
+        
+        audio_segments.append(seg_audio_path)
+        clip_durations.append(seg_duration)
+    
+    # 合并所有音频
+    audio_path = os.path.abspath(os.path.join(work_dir, "narration.mp3"))
+    audio_list_file = os.path.abspath(os.path.join(temp_audio_dir, "audio_list.txt"))
+    with open(audio_list_file, 'w', encoding='utf-8') as f:
+        for seg_audio in audio_segments:
+            # 使用绝对路径，并转义单引号以防路径包含特殊字符
+            safe_path = seg_audio.replace("'", "'\\''")
+            f.write(f"file '{safe_path}'\n")
+            
+    try:
+        import subprocess
+        subprocess.run([
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+            '-i', audio_list_file, '-c', 'copy', audio_path
+        ], capture_output=True, check=True)
+    except Exception as e:
+        print(f"  音频合并失败: {e}，回退到整体合成模式")
+        text_to_speech(script, audio_path)
+    
     print(f"  ✓ 语音合成完成")
     print()
     
-    # 获取音频时长
-    import subprocess
-    try:
-        result = subprocess.run(
-            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-             '-of', 'default=noprint_wrappers=1:nokey=1', audio_path],
-            capture_output=True, text=True
-        )
-        audio_duration = float(result.stdout.strip())
-    except:
-        audio_duration = 60.0
-    
-    # 计算每个片段的时长
-    num_clips = len(usable_clips)
-    clip_duration = audio_duration / num_clips if num_clips > 0 else 5.0
-    clip_durations = [clip_duration] * num_clips
-    
-    # 生成与片段对应的字幕
+    # 生成 SRT 字幕文件
     subtitles = generate_subtitles_for_segments(segment_subtitles, clip_durations)
     srt_path = os.path.join(work_dir, "subtitles.srt")
     save_srt(subtitles, srt_path)
-    print(f"  ✓ 字幕生成完成: {srt_path}")
+    print(f"  ✓ 字幕完成，已根据旁白动态调整时间轴")
     
     # 保存调试信息
     debug_file = os.path.join(work_dir, "debug_segments.json")
@@ -287,27 +321,21 @@ def generate_merged_vlog(
             "usable_clips_count": len(usable_clips),
             "segment_subtitles_count": len(segment_subtitles),
             "subtitles_count": len(subtitles),
-            "clip_duration": clip_duration,
-            "segment_subtitles": segment_subtitles,
-            "usable_clips_info": [
-                {"index": i, "timestamp": c.get("timestamp"), "video": c.get("video_path", "")[-30:]}
-                for i, c in enumerate(usable_clips)
-            ]
+            "clip_durations": clip_durations,
+            "segment_subtitles": segment_subtitles
         }, f, ensure_ascii=False, indent=2)
     print()
-    
-    # 尝试寻找 BGM
 
     # 5. 视频合成
-    print("🎬 步骤 5/5: 视频合成...")
+    print("🎬 步骤 5/5: 视频合成 (采用动态时长模式)...")
     output_path = os.path.join(work_dir, "vlog.mp4")
     
     if mode == "slideshow":
         create_slideshow(all_frame_infos, audio_path, output_path, subtitle_text=script[:100])
     else:
-        print(f"  使用 {len(usable_clips)} 个视频片段，每片段 {clip_duration:.1f}秒")
+        # 这里传递具体的时长列表给视频合成模块
         compose_from_highlights(usable_clips, audio_path, output_path, 
-                                 clip_duration=clip_duration, subtitle_file=srt_path)
+                                 clip_duration=clip_durations, subtitle_file=srt_path)
     
     print(f"  ✓ 视频合成完成")
     print()
