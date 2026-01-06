@@ -759,6 +759,16 @@
                         GM_setValue('autoLikeTasks', tasks);
                         console.log('已点赞', postId, '剩余', tasks.remainingLikes);
                         await new Promise(r => setTimeout(r, 1200 + Math.random() * 500));
+
+                        // 异步检测并关闭弹出的对话框（不阻塞主流程）
+                        setTimeout(() => {
+                            let dialog = document.querySelector('#dialog-holder .btn-primary');
+                            if (dialog) {
+                                console.log('检测到对话框，自动关闭');
+                                dialog.click();
+                            }
+                        }, 200);
+
                     } else {
                         console.log('帖子', postId, '已点赞，跳过');
                         clickedPostIds.add(postId);
@@ -771,7 +781,7 @@
             if (shouldRead) {
                 updateRunningStatus(`阅读中... 已点赞${likedCount}个`);
                 window.scrollBy(0, 300);
-                await new Promise(r => setTimeout(r, 400 + Math.random() * 300));
+                await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
 
                 // 检查是否已到底部
                 if ((window.innerHeight + window.scrollY) >= document.body.scrollHeight - 100) {

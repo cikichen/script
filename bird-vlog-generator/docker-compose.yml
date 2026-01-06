@@ -1,0 +1,12 @@
+services:
+  bird-vlog:
+    build: .
+    container_name: bird-vlog-generator
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - ./input:/app/input      # 输入视频目录
+      - ./output:/app/output    # 输出目录
+    # 运行示例: docker compose run bird-vlog /app/input/video.mp4

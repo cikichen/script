@@ -1,0 +1,39 @@
+# 环境变量文件
+.env
+**/.env
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+**/__pycache__/
+.venv/
+env/
+venv/
+ENV/
+
+# 输出目录 (针对 bird-vlog-generator 项目)
+output/
+**/output/
+out/
+**/out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# YOLO 模型权重
+*.pt
+**/yolov8n.pt
+
+# 临时文件
+*.tmp
+temp/
+**/temp/
